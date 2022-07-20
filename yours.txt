@@ -1,0 +1,368 @@
+using Microsoft.EntityFrameworkCore;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using TranSmart.Core.Result;
+using TranSmart.Data;
+using TranSmart.Data.Repository.Leave;
+using TranSmart.Domain.Entities.Leave;
+using TranSmart.Domain.Entities.Organization;
+using TranSmart.Domain.Entities.Payroll;
+using TranSmart.Domain.Models.Organization;
+using TranSmart.Domain.Models.Reports;
+using TranSmart.Domain.Models.Reports.Generated;
+using TranSmart.Domain.Models.Reports.LMS;
+
+namespace TranSmart.Service.Reports
+{
+    public interface ILMSReportService
+    {
+        Task<IEnumerable<AttendanceModel>> Attendances(Guid? departmentId, Guid? designationId, Guid? teamId, Guid? employeeId, DateTime? fromDate, DateTime? toDate);
+        Task<IEnumerable<AttendanceModel>> MyTeamAttendance(Guid? departmentId, Guid? designationId, Guid? employeeId, DateTime? fromDate, DateTime? toDate, int? attendanceStatus, Guid ReportingToId);
+        Task<IEnumerable<EmployeeResignationModel>> ResignedEmployees(Guid? departmentId, Guid? designationId, Guid? teamId, Guid? employeeId, DateTime? fromDate, DateTime? toDate);
+        Task<IEnumerable<EmployeeInfoModel>> NewEmployees(Guid? departmentId, Guid? designationId, Guid? teamId, Guid? employeeId, DateTime? fromDate, DateTime? toDate);
+        Task<IEnumerable<ShiftModel>> ShiftAndWeekOffReport(Guid? shiftId, Guid? weekOffId);
+        Task<IEnumerable<EmployeeActiveAddressModel>> EmployeePermanentAddress(Guid? departmentId, Guid? designationId, Guid? teamId, Guid? employeeId, DateTime? joinDateFrom, DateTime? joinDateTo, int? type);
+        Task<IEnumerable<EmployeeActiveAddressModel>> EmployeePresentAddress(Guid? departmentId, Guid? designationId, Guid? teamId, Guid? employeeId, DateTime? joinDateFrom, DateTime? joinDateTo, int? type);
+        Task<IEnumerable<EmployeeActiveAddressModel>> EmployeeEmergencyAddress(Guid? departmentId, Guid? designationId, Guid? teamId, Guid? employeeId, DateTime? joinDateFrom, DateTime? joinDateTo, int? type);
+        Task<IEnumerable<AllActiveEmployeesReportModel>> AllActiveEmplyees(Guid? departmentId, Guid? designationId, Guid? teamId, Guid? employeeId, DateTime? fromDate, DateTime? toDate, DateTime? dateOfBirth, Guid? workType, Guid? empCategoryId);
+        Task<IEnumerable<AttandanceRpt>> SelfAttendance(DateTime? fromDate, DateTime? toDate, int? attendanceStatus, Guid empId);
+
+        Task<IEnumerable<EmployeeContactReportModel>> AllEmployeeContactDetails(Guid? departmentId, Guid? designationId, Guid? teamId, Guid? employeeId, DateTime? fromDate, DateTime? toDate);
+        Task<IEnumerable<LeaveBalancesModel>> MyTeamLeaveBalances(Guid? departmentId, Guid? designationId, Guid? employeeId, Guid? leavetypaId, Guid ReportingToId);
+        Task<IEnumerable<LeaveBalancesModel>> LeaveBalances(Guid? deptId, Guid? designId, Guid? teamId, Guid? leaveTypeId);
+    }
+    public class LMSReportService : ILMSReportService
+    {
+        private readonly IUnitOfWork _UOW;
+        private readonly ILeaveBalanceRepository _repository;
+        public LMSReportService(IUnitOfWork uow, ILeaveBalanceRepository repository)
+        {
+            _UOW = uow;
+            _repository = repository;
+        }
+        public static string AttendenceStatus(int? status)
+        {
+            return status == 1 ? "Present" : status == 2 ? "Leave" : status == 3 ? "Absent" : status == 4 ? "WeekOff" : status == 5 ? "Holiday" : status == 6 ? "UnAuthorized" : "";
+        }
+        public async Task<IEnumerable<AttendanceModel>> Attendances(Guid? departmentId, Guid? designationId, Guid? teamId, Guid? employeeId, DateTime? fromDate, DateTime? toDate)
+        {
+            return await _UOW.GetRepositoryAsync<Attendance>().GetWithSelectAsync(
+                selector: d => new AttendanceModel
+                {
+                    AttendanceStatus = AttendenceStatus(d.AttendanceStatus),
+                    Name = d.Employee.Name,
+                    Date = d.AttendanceDate,
+                    PunchIn = d.InTime,
+                    PunchOut = d.OutTime,
+                    Breaks = d.Breaks
+                },
+            predicate: x => (((!fromDate.HasValue || x.AttendanceDate >= fromDate)
+                                && (!toDate.HasValue || x.AttendanceDate <= toDate))
+                                && ((departmentId == null || x.Employee.DepartmentId == departmentId)
+                                && (designationId == null || x.Employee.DesignationId == designationId)
+                                && (employeeId == null || x.EmployeeId == employeeId)
+                                && (teamId == null || x.Employee.TeamId == teamId))));
+        }
+        public async Task<IEnumerable<AttendanceModel>> MyTeamAttendance(Guid? departmentId, Guid? designationId, Guid? employeeId, DateTime? fromDate, DateTime? toDate, int? attendanceStatus, Guid ReportingToId)
+        {
+            return await _UOW.GetRepositoryAsync<Attendance>().GetWithSelectAsync(
+                selector: d => new AttendanceModel
+                {
+                    AttendanceStatus = AttendenceStatus(d.AttendanceStatus),
+                    Date = d.AttendanceDate,
+                    PunchIn = d.InTime,
+                    PunchOut = d.OutTime,
+                    Breaks = d.Breaks
+                    //Production=d.
+
+                },
+                predicate: x => (((!fromDate.HasValue || x.AttendanceDate >= fromDate)
+                                && (!toDate.HasValue || x.AttendanceDate <= toDate))
+                                && ((departmentId == null || x.Employee.DepartmentId == departmentId)
+                                && (designationId == null || x.Employee.DesignationId == designationId)
+                                && (employeeId == null || x.EmployeeId == employeeId)
+                                && (attendanceStatus == null || x.AttendanceStatus == attendanceStatus))) && x.Employee.ReportingToId == ReportingToId);
+
+        }
+
+        public async Task<IEnumerable<AttandanceRpt>> SelfAttendance(DateTime? fromDate, DateTime? toDate, int? attendanceStatus, Guid empId)
+        {
+            return await _UOW.GetRepositoryAsync<Attendance>().GetWithSelectAsync(
+                include: x => x.Include(i => i.Employee),
+                selector: d => new AttandanceRpt
+                {
+                    AttendanceStatus = AttendenceStatus(d.AttendanceStatus),
+                    Date = d.AttendanceDate,
+                    PunchIn = d.InTime.Value.ToString("yyyy-MM-dd HH:mm:ss"),
+                    PunchOut = d.OutTime.Value.ToString("yyyy-MM-dd HH:mm:ss"),
+                    Breaks = d.BreakTime
+
+                },
+                predicate: x => x.EmployeeId == empId && x.AttendanceDate.Date >= fromDate && x.AttendanceDate.Date <= toDate
+                                && x.AttendanceStatus == attendanceStatus);
+        }
+
+        public async Task<IEnumerable<EmployeeResignationModel>> ResignedEmployees(Guid? departmentId, Guid? designationId, Guid? teamId, Guid? employeeId, DateTime? fromDate, DateTime? toDate)
+        {
+            return await _UOW.GetRepositoryAsync<EmployeeResignation>().GetWithSelectAsync(
+                predicate:x => (((!fromDate.HasValue || x.ResignationOn >= fromDate)
+                                && (!toDate.HasValue || x.ResignationOn <= toDate))
+                                && ((departmentId == null || x.Employee.DepartmentId == departmentId)
+                                && (designationId == null || x.Employee.DesignationId == designationId)
+                                && (employeeId == null || x.EmployeeId == employeeId)
+                                && (teamId == null || x.Employee.TeamId == teamId))),
+                include: x => x.Include(i => i.Employee),
+                selector: e => new EmployeeResignationModel
+                {
+                    EmployeeName = e.Employee.Name,
+                    EmployeeNo = e.Employee.No,
+                    ResignationOn = e.ResignationOn,
+                    ApprovedOn = e.Employee.ResignedOn.Value,
+                    LeavingReason = e.LeavingReason,
+                    ResignationType = e.ResignationType,
+                    AllowRehiring = e.AllowRehiring,
+                    Description = e.Description
+                });
+        }
+        public async Task<IEnumerable<EmployeeInfoModel>> NewEmployees(Guid? departmentId, Guid? designationId, Guid? teamId, Guid? employeeId, DateTime? fromDate, DateTime? toDate)
+        {
+            List<EmployeeInfoModel> model = new List<EmployeeInfoModel>();
+            List<EmployeeResignation> resignations = (await _UOW.GetRepositoryAsync<EmployeeResignation>().GetAsync()).ToList();
+
+            foreach (var item in resignations)
+            {
+                List<Employee> employees = (await _UOW.GetRepositoryAsync<Employee>().GetAsync(
+                    predicate: p => p.ID != item.EmployeeId && p.DateOfJoining >= fromDate && p.DateOfJoining <= toDate,
+                    include: i => i.Include(x => x.Designation).Include(x => x.Department))).ToList();
+                model.AddRange(employees.Select(k => new EmployeeInfoModel
+                {
+                    Name = k.Name,
+                    EmployeeNo = k.No,
+                    DateofBirth = k.DateofBirth,
+                    DateOfJoining = k.DateOfJoining,
+                    Gender = k.Gender,
+                    Department = k.Department.Name,
+                    Designation = k.Designation.Name
+                }));
+            }
+            if (resignations.Count == 0)
+            {
+                var newEmployees = await _UOW.GetRepositoryAsync<Employee>().GetAsync(
+                    predicate: p => p.DateOfJoining >= fromDate && p.DateOfJoining <= toDate,
+                    include: i => i.Include(x => x.Department).Include(x => x.Designation));
+                model.AddRange(newEmployees.Select(k => new EmployeeInfoModel
+                {
+                    Name = k.Name,
+                    EmployeeNo = k.No,
+                    DateofBirth = k.DateofBirth,
+                    DateOfJoining = k.DateOfJoining,
+                    Gender = k.Gender,
+                    Department = k.Department.Name,
+                    Designation = k.Designation.Name
+                }));
+            }
+            return model;
+        }
+        public async Task<IEnumerable<ShiftModel>> ShiftAndWeekOffReport(Guid? shiftId, Guid? weekOffId)
+        {
+            List<ShiftModel> model = new List<ShiftModel>();
+            List<Allocation> allocations = (await _UOW.GetRepositoryAsync<Allocation>().GetAsync(
+                predicate: p => p.ShiftId == shiftId && p.WeekOffSetupId == weekOffId,
+                include: i => i.Include(x => x.Shift).Include(x => x.Employee).ThenInclude(x => x.Department)
+                .Include(x => x.Employee).ThenInclude(x => x.Designation))).ToList();
+            foreach (var item in allocations)
+            {
+                var weekOff = await _UOW.GetRepositoryAsync<WeekOffSetup>().SingleAsync(x => x.ID == weekOffId);
+                model.Add(new ShiftModel
+                {
+                    EmpCode = item.Employee.No,
+                    EmpName = item.Employee.Name,
+                    Department = item.Employee.Department.Name,
+                    Designation = item.Employee.Designation.Name,
+                    DateOfJoining = item.Employee.DateOfJoining,
+                    ShiftName = item.Shift.Name,
+                    WeekOffName = weekOff.Name
+                });
+            }
+            return model;
+        }
+
+        public async Task<IEnumerable<EmployeeActiveAddressModel>> EmployeeEmergencyAddress(Guid? departmentId, Guid? designationId, Guid? teamId, Guid? employeeId, DateTime? joinDateFrom, DateTime? joinDateTo, int? type)
+        {
+            return await _UOW.GetRepositoryAsync<EmployeeEmergencyAd>().GetWithSelectAsync(
+               selector: d => new EmployeeActiveAddressModel
+               {
+                   AddressLine1 = d.AddressLineFrst,
+                   AddressLineScnd = d.AddressLineScnd,
+                   Citytown = d.Citytown,
+                   Country = d.Country,
+                   State = d.State
+               },
+               predicate: x => x.AddressLineFrst != "" && (((!joinDateFrom.HasValue || x.Employee.DateOfJoining >= joinDateFrom)
+                                && (!joinDateTo.HasValue || x.Employee.DateOfJoining <= joinDateTo))
+                                && ((departmentId == null || x.Employee.DepartmentId == departmentId)
+                                && (designationId == null || x.Employee.DesignationId == designationId)
+                                && (employeeId == null || x.EmployeeId == employeeId)
+                                && (teamId == null || x.Employee.TeamId == teamId))));
+
+            //p.Employee.DateOfJoining >= joinDateFrom && p.Employee.DateOfJoining <= joinDateTo && p.Employee.DesignationId == designationId && p.Employee.DepartmentId == departmentId);
+        }
+        public async Task<IEnumerable<EmployeeActiveAddressModel>> EmployeePresentAddress(Guid? departmentId, Guid? designationId, Guid? teamId, Guid? employeeId, DateTime? joinDateFrom, DateTime? joinDateTo, int? type)
+        {
+            return await _UOW.GetRepositoryAsync<EmployeePresentAd>().GetWithSelectAsync(
+               selector: d => new EmployeeActiveAddressModel
+               {
+                   AddressLine1 = d.AddressLineFrst,
+                   AddressLineScnd = d.AddressLineScnd,
+                   Citytown = d.Citytown,
+                   Country = d.Country,
+                   State = d.State
+               },
+               predicate: x => x.AddressLineFrst != "" && (((!joinDateFrom.HasValue || x.Employee.DateOfJoining >= joinDateFrom)
+                                && (!joinDateTo.HasValue || x.Employee.DateOfJoining <= joinDateTo))
+                                && ((departmentId == null || x.Employee.DepartmentId == departmentId)
+                                && (designationId == null || x.Employee.DesignationId == designationId)
+                                && (employeeId == null || x.EmployeeId == employeeId)
+                                && (teamId == null || x.Employee.TeamId == teamId))));
+            //p.Employee.DateOfJoining >= joinDateFrom && p.Employee.DateOfJoining <= joinDateTo && p.Employee.DesignationId == designationId && p.Employee.DepartmentId == departmentId);
+        }
+        public async Task<IEnumerable<EmployeeActiveAddressModel>> EmployeePermanentAddress(Guid? departmentId, Guid? designationId, Guid? teamId, Guid? employeeId, DateTime? joinDateFrom, DateTime? joinDateTo, int? type)
+        {
+            return await _UOW.GetRepositoryAsync<EmployeePermanentAd>().GetWithSelectAsync(
+               selector: d => new EmployeeActiveAddressModel
+               {
+                   AddressLine1 = d.AddressLineFrst,
+                   AddressLineScnd = d.AddressLineScnd,
+                   Citytown = d.Citytown,
+                   Country = d.Country,
+                   State = d.State
+               },
+               predicate: x => x.AddressLineFrst != "" && (((!joinDateFrom.HasValue || x.Employee.DateOfJoining >= joinDateFrom)
+                                && (!joinDateTo.HasValue || x.Employee.DateOfJoining <= joinDateTo))
+                                && ((departmentId == null || x.Employee.DepartmentId == departmentId)
+                                && (designationId == null || x.Employee.DesignationId == designationId)
+                                && (employeeId == null || x.EmployeeId == employeeId)
+                                && (teamId == null || x.Employee.TeamId == teamId))));
+            //p.Employee.DateOfJoining >= joinDateFrom && p.Employee.DateOfJoining <= joinDateTo && p.Employee.DesignationId == designationId && p.Employee.DepartmentId == departmentId);
+        }
+        public async Task<IEnumerable<AllActiveEmployeesReportModel>> AllActiveEmplyees(Guid? departmentId, Guid? designationId, Guid? teamId, Guid? employeeId, DateTime? fromDate, DateTime? toDate, DateTime? dateOfBirth, Guid? workType, Guid? empCategoryId)
+        {
+            return await _UOW.GetRepositoryAsync<Employee>().GetWithSelectAsync(
+               selector: d => new AllActiveEmployeesReportModel
+               {
+                   EmpCode = d.No,
+                   Name = d.Name,
+                   PanNumber = d.PanNumber,
+                   MobileNumber = d.MobileNumber,
+                   Department = d.Department.Name,
+                   Designation = d.Designation.Name,
+                   DateOfJoining = d.DateOfJoining,
+                   PersonalEmail = d.PersonalEmail,
+                   WorkEmail = d.WorkEmail,
+                   Team = d.Team.Name,
+                   WorkLocation = d.WorkLocation.Name,
+                   DateofBirth = d.DateofBirth,
+                   Gender = d.Gender,
+                   FatherName = d.FatherName,
+                   AadharNumber = d.AadharNumber,
+                   ReportingTo = d.ReportingTo.Name,
+                   WorkType = d.WorkType.Name,
+                   EmpCategory = d.EmpCategory.Name,
+                   ProfileStatus = d.ProfileStatus,
+                   MaritalStatus = d.MaritalStatus,
+                   BloodGroup = d.BloodGroup,
+                   Status = d.Status
+               },
+               predicate: x => (((!fromDate.HasValue || x.DateOfJoining >= fromDate)
+                                && (!toDate.HasValue || x.DateOfJoining <= toDate) && (string.IsNullOrEmpty(dateOfBirth.ToString()) || x.DateofBirth == dateOfBirth))
+
+                                     && ((departmentId == null || x.DepartmentId == departmentId)
+                                     && (designationId == null || x.DesignationId == designationId)
+                                     && (employeeId == null || x.ID == employeeId)
+                                     && (teamId == null || x.TeamId == teamId)
+                                     && (workType == null || x.WorkTypeId == workType)
+                                     && (empCategoryId == null || x.EmpCategoryId == empCategoryId))),
+
+               include: i => i.Include(x => x.WorkType).Include(x => x.Team).Include(x => x.EmpCategory).Include(x => x.ReportingTo)
+                         .Include(x => x.Department).Include(x => x.Designation));
+        }
+
+
+        public async Task<IEnumerable<EmployeeContactReportModel>> AllEmployeeContactDetails(Guid? departmentId, Guid? designationId, Guid? teamId, Guid? employeeId, DateTime? fromDate, DateTime? toDate)
+        {
+            return await _UOW.GetRepositoryAsync<EmployeeFamily>().GetWithSelectAsync(
+                   selector: d => new EmployeeContactReportModel
+                   {
+
+                       PersonName = d.PersonName,
+                       HumanRelation = d.HumanRelation,
+                       ContactNo = d.ContactNo,
+                       Department = d.Employee.Department.Name,
+                       DateOfJoining = d.Employee.DateOfJoining,
+                       Designation = d.Employee.Designation.Name,
+                       No = d.Employee.No,
+                       Name = d.Employee.Name
+                   },
+                   predicate: x => (((!fromDate.HasValue || x.Employee.DateOfJoining >= fromDate)
+                                && (!toDate.HasValue || x.Employee.DateOfJoining <= toDate))
+
+                                     && ((departmentId == null || x.Employee.DepartmentId == departmentId)
+                                     && (designationId == null || x.Employee.DesignationId == designationId)
+                                     && (employeeId == null || x.EmployeeId == employeeId)
+                                     && (teamId == null || x.Employee.TeamId == teamId))),
+                     include: i => i.Include(x => x.Employee).ThenInclude(x => x.Department)
+                                    .Include(x => x.Employee).ThenInclude(x => x.Designation));
+
+            //(x.Employee.DateOfJoining >= fromDate && x.Employee.DateOfJoining <= toDate) && (x.Employee.DepartmentId == Department || x.Employee.DesignationId == Designation)
+        }
+        public async Task<IEnumerable<LeaveBalancesModel>> MyTeamLeaveBalances(Guid? departmentId, Guid? designationId,  Guid? employeeId, Guid? leavetypaId, Guid ReportingToId)
+        {
+            return await _UOW.GetRepositoryAsync<LeaveBalance>().GetWithSelectAsync(
+                selector: d => new LeaveBalancesModel
+                {
+                    No = d.Employee.No,
+                    Name = d.Employee.Name,
+                    Leaves = d.Leaves,
+                    Designation = d.Employee.Designation.Name,
+                    LeaveType = d.LeaveType.Name,
+                    Balance = d.CustomizedBal.NewBalance
+                },
+                predicate: x => ((((departmentId == null || x.Employee.DepartmentId == departmentId)
+                                     && (designationId == null || x.Employee.DesignationId == designationId)
+                                     && (employeeId == null || x.EmployeeId == employeeId)) && (x.ID == leavetypaId)) 
+                                     && x.Employee.ReportingToId == ReportingToId));
+        }
+        public async Task<IEnumerable<LeaveBalancesModel>> LeaveBalances(Guid? deptId, Guid? designId, Guid? teamId, Guid? leaveTypeId)
+        {
+            return await _repository.BalanceReport(deptId, designId, teamId, leaveTypeId);
+            //List<LeaveBalancesModel> leaves = new List<LeaveBalancesModel>();
+            //List<LeaveBalance> leaveBalances = _UOW.GetRepository<LeaveBalance>().Get(
+            //    predicate: p => (string.IsNullOrEmpty(deptId.ToString()) || p.Employee.DepartmentId == deptId)
+            //                      && (string.IsNullOrEmpty(designId.ToString()) || p.Employee.DesignationId == designId)
+            //                      && (string.IsNullOrEmpty(teamId.ToString()) || p.Employee.TeamId == teamId)
+            //                      && (string.IsNullOrEmpty(leaveTypeId.ToString()) || p.LeaveTypeId == leaveTypeId),
+            //    include: i => i.Include(x => x.LeaveType).Include(x => x.Employee)).ToList();
+            //List<Employee> emps = _UOW.GetRepository<Employee>().Get(
+            //    include: i => i.Include(x => x.Designation)).ToList();
+
+            //foreach (var item in leaveBalances.GroupBy(x => new { x.EmployeeId, x.LeaveTypeId }))
+            //{
+            //    var leaveBal = leaveBalances.Where(x => x.EmployeeId == item.Key.EmployeeId && x.LeaveTypeId == item.Key.LeaveTypeId);
+            //    leaves.Add(new LeaveBalancesModel
+            //    {
+            //        Balance = (int)leaveBal.Sum(x => x.Leaves),
+            //        LeaveType = leaveBal.FirstOrDefault().LeaveType.Name,
+            //        Designation = emps.FirstOrDefault(x => x.ID == item.Key.EmployeeId).Designation.Name,
+            //        Name = leaveBal.FirstOrDefault().Employee.Name,
+            //        No = emps.FirstOrDefault(x => x.ID == item.Key.EmployeeId).No,
+            //    });
+
+            //}
+            //return leaves;
+        }
+
+    }
+}
