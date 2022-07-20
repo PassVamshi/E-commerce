@@ -15,6 +15,11 @@ using TranSmart.Domain.Models.Reports;
 using TranSmart.Domain.Models.Reports.Generated;
 using TranSmart.Domain.Models.Reports.LMS;
 
+
+
+  
+
+//ther ugyidsajkasdjk
 namespace TranSmart.Service.Reports
 {
     public interface ILMSReportService
